@@ -19,6 +19,8 @@
 package org.apache.flink.training.exercises.ridesandfares;
 
 import org.apache.flink.api.common.JobExecutionResult;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -76,6 +78,20 @@ public class RidesAndFaresExercise {
         // Create the pipeline.
         rides.connect(fares).flatMap(new EnrichmentFunction()).addSink(sink);
 
+
+//        DataStream<Tuple2<Integer, Minutes>> minutesByStartCell = enrichedNYCRides
+//                .flatMap(new FlatMapFunction<EnrichedRide, Tuple2<Integer, Minutes>>() {
+//                    @Override public void flatMap(EnrichedRide ride, Collector<Tuple2<Integer, Minutes>> out)
+//                            throws Exception {
+//                        if (!ride.isStart) {
+//                            Interval rideInterval = new Interval(ride.startTime, ride.endTime);
+//                            Minutes duration = rideInterval.toDuration().toStandardMinutes();
+//                            out.collect(new Tuple2<>(ride.startCell, duration));
+//                        }
+//                    }
+//                });
+
+
         // Execute the pipeline and return the result.
         return env.execute("Join Rides with Fares");
     }
@@ -99,19 +115,38 @@ public class RidesAndFaresExercise {
     public static class EnrichmentFunction
             extends RichCoFlatMapFunction<TaxiRide, TaxiFare, RideAndFare> {
 
+        private transient ValueState<TaxiRide> taxiRideState;
+        private transient ValueState<TaxiFare> taxiFareState;
+
         @Override
         public void open(Configuration config) throws Exception {
-            throw new MissingSolutionException();
+            ValueStateDescriptor<TaxiRide> rideDesc = new ValueStateDescriptor<>("taxiRideState", TaxiRide.class);
+            taxiRideState = getRuntimeContext().getState(rideDesc);
+
+            ValueStateDescriptor<TaxiFare> fareDesc = new ValueStateDescriptor<>("taxiFareState", TaxiFare.class);
+            taxiFareState = getRuntimeContext().getState(fareDesc);
         }
 
         @Override
         public void flatMap1(TaxiRide ride, Collector<RideAndFare> out) throws Exception {
-            throw new MissingSolutionException();
+            TaxiFare fare = taxiFareState.value();
+            if(fare == null) {
+                taxiRideState.update(ride);
+            } else {
+                taxiFareState.clear();
+                out.collect(new RideAndFare(ride, fare));
+            }
         }
 
         @Override
         public void flatMap2(TaxiFare fare, Collector<RideAndFare> out) throws Exception {
-            throw new MissingSolutionException();
+            TaxiRide ride = taxiRideState.value();
+            if(ride == null) {
+                taxiFareState.update(fare);
+            } else {
+                taxiRideState.clear();
+                out.collect(new RideAndFare(ride, fare));
+            }
         }
     }
 }
