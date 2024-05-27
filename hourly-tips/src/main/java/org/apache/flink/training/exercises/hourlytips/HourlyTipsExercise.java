@@ -19,15 +19,22 @@
 package org.apache.flink.training.exercises.hourlytips;
 
 import org.apache.flink.api.common.JobExecutionResult;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.PrintSinkFunction;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
+import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
+import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
+import org.apache.flink.streaming.api.windowing.time.Time;
+import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.training.exercises.common.datatypes.TaxiFare;
 import org.apache.flink.training.exercises.common.sources.TaxiFareGenerator;
 import org.apache.flink.training.exercises.common.utils.MissingSolutionException;
+import org.apache.flink.training.solutions.hourlytips.HourlyTipsSolution;
+import org.apache.flink.util.Collector;
 
 /**
  * The Hourly Tips exercise from the Flink training.
@@ -73,21 +80,43 @@ public class HourlyTipsExercise {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
         // start the data generator
-        DataStream<TaxiFare> fares = env.addSource(source);
+        //DataStream<TaxiFare> fares = env.addSource(source);
+        DataStream<TaxiFare> fares = env.addSource(source).assignTimestampsAndWatermarks(
+                WatermarkStrategy.<TaxiFare>forMonotonousTimestamps().withTimestampAssigner(
+                        (fare, taxiFare) -> fare.getEventTimeMillis()));
 
-        // replace this with your solution
-        if (true) {
-            throw new MissingSolutionException();
-        }
+        // compute tips per hour for each driver
+        DataStream<Tuple3<Long, Long, Float>> hourlyTips =
+                fares.keyBy((TaxiFare fare) -> fare.driverId)
+                    .window(TumblingEventTimeWindows.of(Time.hours(1)))
+                        .process(new HourlyTipsExercise.AddTips());
 
-        // the results should be sent to the sink that was passed in
-        // (otherwise the tests won't work)
-        // you can end the pipeline with something like this:
+        // find the driver with the highest sum of tips for each hour
+        DataStream<Tuple3<Long, Long, Float>> hourlyMax =
+                hourlyTips.windowAll(TumblingEventTimeWindows.of(Time.hours(1))).maxBy(2);
 
         // DataStream<Tuple3<Long, Long, Float>> hourlyMax = ...
-        // hourlyMax.addSink(sink);
+        hourlyMax.addSink(sink);
 
         // execute the pipeline and return the result
         return env.execute("Hourly Tips");
+    }
+
+    public static class AddTips
+            extends ProcessWindowFunction<TaxiFare, Tuple3<Long, Long, Float>, Long, TimeWindow> {
+
+        @Override
+        public void process(
+                Long key,
+                Context context,
+                Iterable<TaxiFare> fares,
+                Collector<Tuple3<Long, Long, Float>> out) {
+
+            float sumOfTips = 0F;
+            for (TaxiFare f : fares) {
+                sumOfTips += f.tip;
+            }
+            out.collect(Tuple3.of(context.window().getEnd(), key, sumOfTips));
+        }
     }
 }
