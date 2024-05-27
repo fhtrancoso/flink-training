@@ -80,18 +80,16 @@ public class HourlyTipsExercise {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
         // start the data generator
-        //DataStream<TaxiFare> fares = env.addSource(source);
         DataStream<TaxiFare> fares = env.addSource(source).assignTimestampsAndWatermarks(
                 WatermarkStrategy.<TaxiFare>forMonotonousTimestamps().withTimestampAssigner(
                         (fare, taxiFare) -> fare.getEventTimeMillis()));
 
-        // compute tips per hour for each driver
+        // generating hourly tips keyed by driverId in a 1 hour window
         DataStream<Tuple3<Long, Long, Float>> hourlyTips =
                 fares.keyBy((TaxiFare fare) -> fare.driverId)
                     .window(TumblingEventTimeWindows.of(Time.hours(1)))
                         .process(new HourlyTipsExercise.AddTips());
 
-        // find the driver with the highest sum of tips for each hour
         DataStream<Tuple3<Long, Long, Float>> hourlyMax =
                 hourlyTips.windowAll(TumblingEventTimeWindows.of(Time.hours(1))).maxBy(2);
 
